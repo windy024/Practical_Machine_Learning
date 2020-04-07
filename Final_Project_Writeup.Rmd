@@ -1,0 +1,150 @@
+---
+title: "Practical Machine Learning"
+author: "Aravind S"
+date: "06/04/2020"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# INTRODUCTION
+This document is submitted as an assignment as a part of the course, "Practical Machine Learning" in Coursera
+
+# BACKGROUND 
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. 
+
+The aim of this exercise is to predict the type of activity being performed using the 4 different movements (Arm, Forear, Belt and Dumbell)
+
+The weight lifting dataset was obtained from the source:  http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+
+## LOADING THE REQUIRED LIBRARIES
+```{r include=FALSE}  
+knitr::opts_chunk$set(echo = TRUE,cache = TRUE) 
+```
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(caret)
+library(e1071)
+library(rattle)
+library(kernlab)
+library(RANN)
+library(ISLR)
+library(splines)
+library(randomForest)
+library(gbm)
+library(data.table)
+library(dplyr)
+library(corrplot)
+```
+
+## READING THE DATASET
+```{r}
+setwd("D:\\Coursera\\Practical_Machine_Learning")
+training <- as.data.frame(fread("pml-training.csv"))
+dim(training)
+```
+
+# PREPROCESSING
+Removing the columns serial numbers, name and time stamps since they cannot be used as an input to the model.
+```{r}
+training <- training[,-c(1:5)]
+dim(training)
+```
+
+Removing columns which are mostly(>95%) NA and have Zero variance
+```{r}
+allna <- sapply(training,function(x) mean(is.na(x))) > 0.95
+training <- training[,allna==FALSE]
+NZV <- nearZeroVar(training)
+training <- training[,-NZV]
+dim(training)
+```
+
+Partitioning the data into 70% and 30% to build the model and test it
+```{r}
+inTrain  <- createDataPartition(training$classe, p=0.7, list=FALSE)
+TrainSet <- training[inTrain, ]
+TestSet  <- training[-inTrain, ]
+dim(TrainSet)
+dim(TestSet)
+```
+
+Looking the correlation between the remaining 53 variables
+```{r}
+cormatrix <- cor(training[,-54])
+corrplot(cormatrix, order = "FPC", method = "color", type = "lower", tl.cex=0.4, tl.col=rgb(0,0,0))
+```
+
+Since the correlations are between the same movement type (i.e. forearm - forearm, etc.) we do not go for a PCA or a variable reduction technique
+
+# MODEL TRAINING
+We shall try to fit the following models in the training data set
+
+1. Decision Tree
+2. Generalized Boosted Model
+3. Random Forest
+
+### DECISION TREE
+```{r}
+#decision tree
+decision_tree <- train(classe~.,method="rpart",data=TrainSet)
+
+fancyRpartPlot(decision_tree$finalModel)
+
+predictDecTree <- predict(decision_tree, newdata=TestSet)
+confMatDecTree <- confusionMatrix(predictDecTree, as.factor(TestSet$classe))
+confMatDecTree
+
+plot(confMatDecTree$table, col = confMatDecTree$byClass, 
+     main = paste("Decision Tree - Accuracy =",
+                  round(confMatDecTree$overall['Accuracy'], 4)))
+```
+
+### GENERALIZED BOOSTING MODEL
+```{r}
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modFitGBM  <- train(classe ~ ., data=TrainSet, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE) 
+modFitGBM$finalModel
+
+predictGBM <- predict(modFitGBM, newdata=TestSet)
+confMatGBM <- confusionMatrix(predictGBM, as.factor(TestSet$classe))
+confMatGBM
+
+plot(confMatGBM$table, col = confMatGBM$byClass, 
+     main = paste("GBM - Accuracy =", round(confMatGBM$overall['Accuracy'], 4)))
+```
+
+### RANDOM FOREST
+```{r}
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modFit <- train(classe~ .,data=TrainSet,method="rf",prox=TRUE,trControl=controlRF)
+modFit$finalModel
+
+predictRandForest <- predict(modFit, newdata=TestSet)
+confMatRandForest <- confusionMatrix(predictRandForest, as.factor(TestSet$classe))
+confMatRandForest
+
+# plot matrix results
+plot(confMatRandForest$table, col = confMatRandForest$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(confMatRandForest$overall['Accuracy'], 4)))
+```
+
+## MODEL RESULTS
+As seen in the model training, the following are the accuracies for the three models
+
+1. Decision Tree - 57.23%
+2. Generalized Boosting Model - 98.95%
+3. Random Forest - 99.88%
+
+Random Forest is going to be used to predict the dataset for the quiz
